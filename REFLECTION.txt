@@ -1,0 +1,47 @@
+Quick Summary:
+I implemented and debugged client/server communication, added client-side caching, fixed CORS/HTTPS issues, and handled variations in the JSON structure (the category property). The goal was for the UI to reliably and efficiently fetch products from ServerApp.
+
+Key Changes Made
+
+Server – Program.cs:
+Added proper CORS registration and usage (builder.Services.AddCors(...) and app.UseCors(...)) and exposed the api/productlist endpoint, which returns objects with Category = { Id, Name }.
+
+Client – FetchProducts.razor:
+Added fetching logic (GetFromJsonAsync), in-memory caching + localStorage persistence with TTL, a Refresh button, and compact error handling.
+
+JSON Handling:
+Added flexible support for category (using a typed Category or a JsonElement) to prevent deserialization exceptions.
+
+Debugging Issues and How They Were Solved
+
+ERR_SSL_PROTOCOL_ERROR:
+Diagnosis: the client was attempting HTTPS while the server didn’t have TLS/a trusted certificate on that port.
+Solution: run and trust dev certificates (dotnet dev-certs https --trust) or use the correct URL/port.
+
+Invalid BaseAddress/URI:
+Detected route collisions (the client page was at /api/productlist).
+Solution: separate UI routes (/fetchproducts) and API routes (/api/productlist), or set HttpClient.BaseAddress.
+
+JSON Deserialization:
+Error "could not be converted to System.String" occurred because category was an object.
+Solution: use a DTO with a strongly typed Category (recommended), or use JsonElement with a helper to read name or string.
+
+Best Practices for Structuring JSON Responses
+
+Consistency: always return the same structure—for example: Category: { id, name }.
+
+Typed DTOs: prefer Product and Category models on server and client for type safety.
+
+Metadata: add pagination and total count when the dataset grows.
+
+HTTP: use appropriate status codes and compression (gzip, Brotli).
+
+Performance Optimization Applied and Recommendations
+
+Client: in-memory cache + localStorage with TTL to reduce repeated requests; Refresh button to invalidate cache.
+
+Transport: use GetFromJsonAsync and configure HttpClient.BaseAddress for relative routes.
+
+Server (recommended): enable response compression, server-side caching for frequent endpoints, and pagination for large lists.
+
+UI: avoid unnecessary renders; use StateHasChanged() only when needed.

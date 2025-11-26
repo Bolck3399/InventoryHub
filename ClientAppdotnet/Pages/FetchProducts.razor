@@ -1,0 +1,281 @@
+@page "/api/productlist"
+@inject HttpClient HttpClient
+@inject IJSRuntime JS
+@using System.Text.Json
+@using System.Net.Http.Json
+
+@*
+// ======= PREVIOUS VERSION (commented out for reference) =======
+// // Previous longer implementation (kept for history). Each line below is prefixed with //
+// @page "/fetchproducts"
+// @inject HttpClient HttpClient
+// @inject IJSRuntime JS
+// @using System.Text.Json
+// @using System.Net.Http.Json
+//
+// <h3>Product List</h3>
+//
+// <div class="mb-2">
+//     <button class="btn btn-sm btn-primary" @onclick="RefreshAsync">Refresh</button>
+//     @if (lastCacheTime != null)
+//     {
+//         <span class="ms-2 text-muted">Cached: @lastCacheTime.Value.ToLocalTime().ToString("G")</span>
+//     }
+//     @if (isLoading)
+//     {
+//         <span class="ms-2 text-muted">Loading...</span>
+//     }
+// </div>
+//
+// <ul>
+//    @if (products != null)
+//     {
+//         foreach (var product in products)
+//         {
+//             <li>@product.Name - $@product.Price</li>
+//         }
+//     }
+//     else if (!isLoading)
+//     {
+//         <li>No products available.</li>
+//     }
+//     else
+//     {
+//         <li>Loading...</li>
+//     }
+// </ul>
+//
+// @code {
+//     private Product[]? products;
+//     private bool isLoading;
+//     private DateTimeOffset? lastCacheTime;
+//
+//     private const string Key = "fetchProducts_cache_v1";
+//     private static Product[]? _memoryCache;
+//     private static DateTimeOffset? _memoryCacheTime;
+//     private static readonly object _lock = new();
+//     private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60);
+//
+//     protected override async Task OnInitializedAsync()
+//     {
+//         isLoading = true;
+//         try
+//         {
+//             // 1) memory cache
+//             lock (_lock)
+//             {
+//                 if (_memoryCache != null && DateTimeOffset.UtcNow - _memoryCacheTime <= Ttl)
+//                 {
+//                     products = _memoryCache;
+//                     lastCacheTime = _memoryCacheTime;
+//                     return;
+//                 }
+//             }
+//
+//             // 2) localStorage
+//             try
+//             {
+//                 var json = await JS.InvokeAsync<string>("localStorage.getItem", Key);
+//                 if (!string.IsNullOrEmpty(json))
+//                 {
+//                     var cache = JsonSerializer.Deserialize<LocalCache>(json);
+//                     if (cache?.Items != null && DateTimeOffset.UtcNow - cache.Timestamp <= Ttl)
+//                     {
+//                         products = cache.Items;
+//                         lastCacheTime = cache.Timestamp;
+//                         lock (_lock) { _memoryCache = cache.Items; _memoryCacheTime = cache.Timestamp; }
+//                         return;
+//                     }
+//                 }
+//             }
+//             catch { /* ignore localStorage issues */ }
+//
+//             // 3) fetch
+//             await FetchAndStoreAsync();
+//         }
+//         finally { isLoading = false; }
+//     }
+//
+//     private async Task FetchAndStoreAsync()
+//     {
+//         try
+//         {
+//             var url = "https://localhost:5021/api/productlist";
+//             var fetched = await HttpClient.GetFromJsonAsync<Product[]>(url);
+//             if (fetched != null)
+//             {
+//                 products = fetched;
+//                 var now = DateTimeOffset.UtcNow;
+//                 lock (_lock) { _memoryCache = fetched; _memoryCacheTime = now; }
+//                 try { var s = JsonSerializer.Serialize(new LocalCache { Items = fetched, Timestamp = now }); await JS.InvokeVoidAsync("localStorage.setItem", Key, s); } catch { }
+//                 lastCacheTime = now;
+//             }
+//         }
+//         catch (Exception ex)
+//         {
+//             Console.WriteLine($"Error fetching products: {ex.Message}");
+//         }
+//     }
+//
+//     private async Task RefreshAsync()
+//     {
+//         isLoading = true;
+//         try { await FetchAndStoreAsync(); }
+//         finally { isLoading = false; StateHasChanged(); }
+//     }
+//
+//     private class LocalCache { public Product[]? Items { get; set; } public DateTimeOffset Timestamp { get; set; } }
+//
+//     public class Product { public int Id { get; set; } public string Name { get; set; } public double Price { get; set; } public int Stock { get; set; } }
+// }
+// ======= END PREVIOUS VERSION =======
+*@
+
+<!-- UI header -->
+<h3>Product List</h3>
+
+<!-- controls: refresh + cache info -->
+<div class="mb-2">
+    <button class="btn btn-sm btn-primary" @onclick="RefreshAsync">Refresh</button>
+    @if (lastCacheTime != null)
+    {
+        <span class="ms-2 text-muted">Cached: @lastCacheTime.Value.ToLocalTime().ToString("G")</span>
+    }
+    @if (isLoading)
+    {
+        <span class="ms-2 text-muted">Loading...</span>
+    }
+</div>
+
+<!-- products list -->
+<ul>
+   @if (products != null)
+    {
+        foreach (var product in products)
+        {
+            <li>@product.Name - $@product.Price 
+            @if (product.Category != null) 
+            { 
+                <span>- @product.Category.Id</span>
+                <span>- @product.Category.Name</span> 
+
+            }</li>
+        }
+    }
+    else if (!isLoading)
+    {
+        <li>No products available.</li>
+    }
+    else
+    {
+        <li>Loading...</li>
+    }
+</ul>
+
+@code {
+    // state: products array
+    private Product[]? products;
+    // state: loading flag
+    private bool isLoading;
+    // state: last cache timestamp
+    private DateTimeOffset? lastCacheTime;
+
+    // settings: key and ttl
+    private const string Key = "fetchProducts_cache_v1"; // localStorage key
+    private static Product[]? _memoryCache; // in-memory cache
+    private static DateTimeOffset? _memoryCacheTime; // in-memory cache timestamp
+    private static readonly object _lock = new(); // lock for memory cache
+    private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60); // ttl
+
+    // lifecycle: on init, try memory -> localStorage -> network
+    protected override async Task OnInitializedAsync()
+    {
+        // set loading
+        isLoading = true;
+        try
+        {
+            // try memory cache
+            lock (_lock)
+            {
+                if (_memoryCache != null && DateTimeOffset.UtcNow - _memoryCacheTime <= Ttl)
+                {
+                    products = _memoryCache; // restore from memory
+                    lastCacheTime = _memoryCacheTime;
+                    return;
+                }
+            }
+
+            // try localStorage
+            try
+            {
+                var json = await JS.InvokeAsync<string>("localStorage.getItem", Key);
+                if (!string.IsNullOrEmpty(json))
+                {
+                    var cache = JsonSerializer.Deserialize<LocalCache>(json);
+                    if (cache?.Items != null && DateTimeOffset.UtcNow - cache.Timestamp <= Ttl)
+                    {
+                        products = cache.Items; // restore from localStorage
+                        lastCacheTime = cache.Timestamp;
+                        lock (_lock) { _memoryCache = cache.Items; _memoryCacheTime = cache.Timestamp; }
+                        return;
+                    }
+                }
+            }
+            catch { /* ignore localStorage issues */ }
+
+            // fetch from server and store
+            await FetchAndStoreAsync();
+        }
+        finally { isLoading = false; }
+    }
+
+    // fetch helper: get from server and persist caches
+    private async Task FetchAndStoreAsync()
+    {
+        try
+        {
+            var url = "http://localhost:5021/api/productlist"; // server API
+            var fetched = await HttpClient.GetFromJsonAsync<Product[]>(url);
+            if (fetched != null)
+            {
+                products = fetched; // update state
+                var now = DateTimeOffset.UtcNow;
+                lock (_lock) { _memoryCache = fetched; _memoryCacheTime = now; } // save to memory
+                try { var s = JsonSerializer.Serialize(new LocalCache { Items = fetched, Timestamp = now }); await JS.InvokeVoidAsync("localStorage.setItem", Key, s); } catch { }
+                lastCacheTime = now; // record cache time
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error fetching products: {ex.Message}");
+        }
+    }
+
+    // public action: refresh (forces fetch)
+    private async Task RefreshAsync()
+    {
+        isLoading = true; // show loader while refreshing
+        try { await FetchAndStoreAsync(); }
+        finally { isLoading = false; StateHasChanged(); }
+    }
+
+    // small wrapper used for localStorage serialization
+    private class LocalCache { public Product[]? Items { get; set; } public DateTimeOffset Timestamp { get; set; } }
+
+    // product DTO used by this component
+public class Category
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+}
+
+public class Product
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public double Price { get; set; }
+    public int Stock { get; set; }
+
+    public Category? Category { get; set; }   // <- objeto esperado
+}
+}
